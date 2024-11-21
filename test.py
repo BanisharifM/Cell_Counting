@@ -7,8 +7,8 @@ from glob import glob
 import pandas as pd
 from PIL import Image
 import numpy as np
-from model5 import CellCounter
-from main10 import evaluate_model  # Ensure this imports from the correct training script
+from Backup.model5 import CellCounter
+from train import evaluate_model  # Ensure this imports from the correct training script
 
 # Directory to load the test data
 output_dir = "Testing/6/"
