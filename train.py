@@ -15,10 +15,64 @@ from model import CellCounter  # Updated model with global average pooling
 from denseweight import DenseWeight
 import numpy as np
 import matplotlib.pyplot as plt
+import cv2
 
 # Set the output directory for saving models and plots
-output_dir = "Experiments/43/"
+output_dir = "Experiments/48/"
 os.makedirs(output_dir, exist_ok=True)
+
+def preprocess_clusters(image):
+    """
+    Detect and separate clusters in the input image.
+    Uses a combination of GaussianBlur and Watershed Algorithm.
+    """
+    # Ensure the input is 3-channel
+    if len(image.shape) == 2:  # Already grayscale
+        gray = image
+    elif image.shape[-1] == 3:  # RGB or BGR
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        raise ValueError(f"Unexpected image shape: {image.shape}")
+
+    # Apply Gaussian Blur to smooth the image
+    blurred = cv2.GaussianBlur(gray, (11, 11), 0)
+
+    # Convert to uint8 for thresholding
+    blurred_uint8 = cv2.normalize(blurred, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
+    # Binary thresholding
+    _, binary = cv2.threshold(blurred_uint8, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+
+    # Distance transform and Watershed
+    dist_transform = cv2.distanceTransform(binary, cv2.DIST_L2, 5)
+    _, sure_fg = cv2.threshold(dist_transform, 0.7 * dist_transform.max(), 255, 0)
+
+    sure_fg = np.uint8(sure_fg)
+    unknown = cv2.subtract(binary, sure_fg)
+
+    # Marker labelling
+    _, markers = cv2.connectedComponents(sure_fg)
+    markers = markers + 1
+    markers[unknown == 255] = 0
+
+    # Convert markers to the required type
+    markers = markers.astype(np.int32)
+
+    # Watershed algorithm
+    watershed_input = np.stack([gray] * 3, axis=-1).astype(np.uint8)  # Ensure 3 channels
+    markers = cv2.watershed(watershed_input, markers)
+
+    # Extract the cluster-separated result
+    cluster_separated = np.zeros_like(gray)
+    cluster_separated[markers > 1] = 255
+
+    # Ensure 3 channels
+    cluster_separated = np.stack([cluster_separated] * 3, axis=-1)
+
+    return cluster_separated
+
+
+
 
 def custom_collate_fn(batch):
     images, labels, cell_locations = zip(*batch)
@@ -54,7 +108,10 @@ def calculate_metrics(pred_count, true_count):
     percentage_accuracy = (1 - (torch.abs(pred_count - true_count) / true_count)).clamp(0, 1).mean().item() * 100
     return mae, rmse, percentage_accuracy
 
-def train_model(model, train_loader, val_loader, num_epochs=100, learning_rate=5e-5, alpha=1.0, weight_decay=1e-5, patience=100):
+# Weight_decay= 1e-5
+# Learning_Rate= 5e-5
+
+def train_model(model, train_loader, val_loader, num_epochs=100, learning_rate=5e-5, alpha=1.0, weight_decay=8.21253e-05 , patience=100):
     # Setup
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
@@ -69,19 +126,33 @@ def train_model(model, train_loader, val_loader, num_epochs=100, learning_rate=5
     train_metrics = {"MAE": [], "RMSE": [], "PercentageAccuracy": []}
     val_metrics = {"MAE": [], "RMSE": [], "PercentageAccuracy": []}
     early_stop_counter = 0
-    total_mae, total_rmse, total_percentage_accuracy = 0.0, 0.0, 0.0
 
-    for epoch in range(num_epochs):
+    # Add the missing epoch loop
+    for epoch in range(num_epochs):  # Define the epoch loop
         model.train()
         running_loss = 0.0
+        total_mae, total_rmse, total_percentage_accuracy = 0.0, 0.0, 0.0
 
         for inputs, labels, cell_locations in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{num_epochs}"):
-            inputs, labels = inputs.to(device), labels.to(device).view(-1)
-            # Updated to handle the new model outputs
-            cell_count, uncertainty, predicted_locations = model(inputs)
+            inputs = inputs.to(device)
+            labels = labels.to(device).view(-1)
+
+            # Convert each image to NumPy, apply preprocessing, and convert back to tensor
+            cluster_inputs = torch.stack([
+                torch.tensor(
+                    preprocess_clusters(img.cpu().permute(1, 2, 0).numpy()),  # Convert to HWC format for OpenCV
+                    dtype=torch.float32
+                ).permute(2, 0, 1)  # Convert back to CHW format for PyTorch
+                for img in inputs
+            ]).to(device)
+
+            # Forward pass
+            cell_count, uncertainty, predicted_locations = model(inputs, cluster_inputs)
+
+            # Initialize location loss
+            total_location_loss = 0
 
             # Calculate location loss
-            total_location_loss = 0
             for j in range(inputs.size(0)):
                 true_loc = cell_locations[j].to(device)
                 num_locations = true_loc.size(0)
@@ -98,8 +169,8 @@ def train_model(model, train_loader, val_loader, num_epochs=100, learning_rate=5
             total_loss.backward()
             optimizer.step()
             running_loss += total_loss.item()
-            
-            # Metrics calculations
+
+            # Calculate metrics
             mae, rmse, percentage_accuracy = calculate_metrics(cell_count, labels)
             total_mae += mae * inputs.size(0)
             total_rmse += rmse * inputs.size(0)
@@ -132,7 +203,6 @@ def train_model(model, train_loader, val_loader, num_epochs=100, learning_rate=5
 
     return model, train_losses, val_losses, train_metrics, val_metrics, best_epoch, best_val_loss
 
-
 def evaluate_model(model, data_loader, criterion, device):
     model.eval()
     total_loss, total_mae, total_rmse, total_percentage_accuracy = 0.0, 0.0, 0.0, 0.0
@@ -140,8 +210,18 @@ def evaluate_model(model, data_loader, criterion, device):
     with torch.no_grad():
         for inputs, labels, cell_locations in data_loader:
             inputs, labels = inputs.to(device), labels.to(device).view(-1)
-            # Updated to handle the new model outputs
-            cell_count, uncertainty, predicted_locations = model(inputs)
+
+            # Generate cluster-separated images
+            cluster_inputs = torch.stack([
+                torch.tensor(
+                    preprocess_clusters(img.cpu().permute(1, 2, 0).numpy()),  # Convert to HWC format for OpenCV
+                    dtype=torch.float32
+                ).permute(2, 0, 1)  # Convert back to CHW format for PyTorch
+                for img in inputs
+            ]).to(device)
+
+            # Forward pass
+            cell_count, uncertainty, predicted_locations = model(inputs, cluster_inputs)
 
             # Count loss
             count_loss = criterion(cell_count, labels).mean()
@@ -165,7 +245,12 @@ def evaluate_model(model, data_loader, criterion, device):
             total_rmse += rmse * inputs.size(0)
             total_percentage_accuracy += percentage_accuracy * inputs.size(0)
 
-    return total_loss / len(data_loader), total_mae / len(data_loader.dataset), total_rmse / len(data_loader.dataset), total_percentage_accuracy / len(data_loader.dataset)
+    return (
+        total_loss / len(data_loader),
+        total_mae / len(data_loader.dataset),
+        total_rmse / len(data_loader.dataset),
+        total_percentage_accuracy / len(data_loader.dataset),
+    )
 
 
 def plot_losses(train_losses, val_losses):
@@ -186,23 +271,29 @@ def plot_losses(train_losses, val_losses):
 
 
 
-def plot_metrics(train_metrics, val_metrics, metric_name):
-    # Convert tensors to CPU and numpy arrays for plotting
-    train_metrics = [metric.cpu().numpy() if isinstance(metric, torch.Tensor) else metric for metric in train_metrics]
-    val_metrics = [metric.cpu().numpy() if isinstance(metric, torch.Tensor) else metric for metric in val_metrics]
-    
-    plt.figure(figsize=(10, 5))
-    plt.plot(train_metrics, label=f'Training {metric_name}')
-    plt.plot(val_metrics, label=f'Validation {metric_name}')
-    plt.xlabel('Epoch')
-    plt.ylabel(metric_name)
-    plt.title(f'Training and Validation {metric_name}')
-    plt.legend()
-    plt.savefig(os.path.join(output_dir, f'{metric_name.lower()}_plot.png'))
-    plt.close()
+def plot_metrics(train_metrics, val_metrics):
+    """
+    Plot each metric separately from the metrics dictionaries.
+    """
+    for metric_name in train_metrics.keys():
+        # Convert tensors to CPU and NumPy arrays for plotting
+        train_values = [float(metric) for metric in train_metrics[metric_name]]
+        val_values = [float(metric) for metric in val_metrics[metric_name]]
+
+        # Plot the metric
+        plt.figure(figsize=(10, 5))
+        plt.plot(train_values, label=f'Training {metric_name}')
+        plt.plot(val_values, label=f'Validation {metric_name}')
+        plt.xlabel('Epoch')
+        plt.ylabel(metric_name)
+        plt.title(f'Training and Validation {metric_name}')
+        plt.legend()
+        plt.savefig(os.path.join(output_dir, f'{metric_name.lower()}_plot.png'))
+        plt.close()
+
 
 def main():
-    batch_size, num_epochs, learning_rate = 64, 300, 5e-5
+    batch_size, num_epochs, learning_rate = 32, 300, 0.000734941
     train_loader, val_loader = get_data_loaders(batch_size)
     model = CellCounter()
 
@@ -213,8 +304,8 @@ def main():
 
     # Plot losses and metrics
     plot_losses(train_losses, val_losses)
-    for metric in ["MAE", "RMSE", "PercentageAccuracy"]:
-        plot_metrics(train_metrics[metric], val_metrics[metric], metric)
+    plot_metrics(train_metrics, val_metrics)
+
 
     print(f"Training complete. Best model saved in '{output_dir}best_model.pth' (Epoch {best_epoch}) with Val Loss: {best_val_loss:.4f}.")
 

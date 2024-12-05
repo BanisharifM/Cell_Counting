@@ -1,0 +1,23 @@
+Failure # 1 (occurred at 2024-12-05_04-04-43)
+[36mray::ImplicitFunc.train()[39m (pid=3433129, ip=141.142.254.119, actor_id=c7ed2f8cc6250530b2e138e501000000, repr=train_tune_model)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/u/mbanisharifdehkordi/test_env_11/lib/python3.11/site-packages/ray/tune/trainable/trainable.py", line 331, in train
+    raise skipped from exception_cause(skipped)
+  File "/u/mbanisharifdehkordi/test_env_11/lib/python3.11/site-packages/ray/air/_internal/util.py", line 107, in run
+    self._ret = self._target(*self._args, **self._kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/u/mbanisharifdehkordi/test_env_11/lib/python3.11/site-packages/ray/tune/trainable/function_trainable.py", line 45, in <lambda>
+    training_func=lambda: self._trainable_func(self.config),
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/u/mbanisharifdehkordi/test_env_11/lib/python3.11/site-packages/ray/tune/trainable/function_trainable.py", line 250, in _trainable_func
+    output = fn()
+             ^^^^
+  File "/u/mbanisharifdehkordi/Github/Cell Counting/ray_tune.py", line 97, in train_tune_model
+    cluster_inputs = torch.stack([
+                                 ^
+  File "/u/mbanisharifdehkordi/Github/Cell Counting/ray_tune.py", line 99, in <listcomp>
+    preprocess_clusters(img.cpu().permute(1, 2, 0).numpy()),  # Convert to HWC format for OpenCV
+    ^^^^^^^^^^^^^^^^^^^
+NameError: name 'preprocess_clusters' is not defined

@@ -12,6 +12,8 @@ from ray.tune.schedulers import ASHAScheduler
 from dataset_handler import CellDataset
 from model import CellCounter
 from denseweight import DenseWeight
+from train import preprocess_clusters
+
 
 # Set up paths
 TRAIN_PATH = "/u/mbanisharifdehkordi/Github/Cell Counting/IDCIA_Augmentated_V2/images/train"
@@ -92,8 +94,20 @@ def train_tune_model(config):
         running_loss = 0.0
         for inputs, labels, _ in train_loader:
             inputs, labels = inputs.to(device), labels.to(device).view(-1)
+
+            # Generate cluster-separated images
+            cluster_inputs = torch.stack([
+                torch.tensor(
+                    preprocess_clusters(img.cpu().permute(1, 2, 0).numpy()),  # Convert to HWC format for OpenCV
+                    dtype=torch.float32
+                ).permute(2, 0, 1)  # Convert back to CHW format for PyTorch
+                for img in inputs
+            ]).to(device)
+
             optimizer.zero_grad()
-            cell_count, _ = model(inputs)
+
+            # Forward pass
+            cell_count, uncertainty, predicted_locations = model(inputs, cluster_inputs)
             loss = criterion(cell_count, labels).mean()
             loss.backward()
             optimizer.step()
@@ -105,13 +119,23 @@ def train_tune_model(config):
         with torch.no_grad():
             for inputs, labels, _ in val_loader:
                 inputs, labels = inputs.to(device), labels.to(device).view(-1)
-                cell_count, _ = model(inputs)
+
+                # Generate cluster-separated images
+                cluster_inputs = torch.stack([
+                    torch.tensor(
+                        preprocess_clusters(img.cpu().permute(1, 2, 0).numpy()),  # Convert to HWC format for OpenCV
+                        dtype=torch.float32
+                    ).permute(2, 0, 1)  # Convert back to CHW format for PyTorch
+                    for img in inputs
+                ]).to(device)
+
+                # Forward pass
+                cell_count, uncertainty, predicted_locations = model(inputs, cluster_inputs)
                 loss = criterion(cell_count, labels).mean()
                 val_loss += loss.item()
 
         # Report metrics to Ray Tune
         session.report({"val_loss": val_loss / len(val_loader), "train_loss": running_loss / len(train_loader)})
-
 
 
 # Main Ray Tune function
