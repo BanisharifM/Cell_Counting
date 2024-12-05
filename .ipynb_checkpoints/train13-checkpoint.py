@@ -17,7 +17,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Set the output directory for saving models and plots
-output_dir = "Experiments/36/"
+output_dir = "Experiments/44/"
 os.makedirs(output_dir, exist_ok=True)
 
 def custom_collate_fn(batch):
@@ -54,34 +54,41 @@ def calculate_metrics(pred_count, true_count):
     percentage_accuracy = (1 - (torch.abs(pred_count - true_count) / true_count)).clamp(0, 1).mean().item() * 100
     return mae, rmse, percentage_accuracy
 
-def train_model(model, train_loader, val_loader, num_epochs=100, learning_rate=5e-4, alpha=1.0, weight_decay=1e-5, patience=100):
+def train_model(model, train_loader, val_loader, num_epochs=100, learning_rate=5e-5, alpha=1.0, weight_decay=1e-5, patience=100):
+    # Setup
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     criterion = nn.L1Loss(reduction='none')
-    
-    # Update the optimizer to include weight decay
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=50, verbose=True)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=100, verbose=True)
     dw = DenseWeight(alpha=alpha)
 
+    # Fit DenseWeight with training labels
+    all_labels = []
+    for _, labels, _ in train_loader:
+        all_labels.append(labels.cpu().numpy())  # Collect labels in NumPy format
+    all_labels = np.concatenate(all_labels)  # Combine all labels into a single array
+    dw.fit(all_labels)  # Fit DenseWeight using the training labels
+
     best_val_loss = float('inf')
+    best_epoch = -1
     train_losses, val_losses = [], []
     train_metrics = {"MAE": [], "RMSE": [], "PercentageAccuracy": []}
     val_metrics = {"MAE": [], "RMSE": [], "PercentageAccuracy": []}
     early_stop_counter = 0
+    total_mae, total_rmse, total_percentage_accuracy = 0.0, 0.0, 0.0
 
     for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
-        total_mae, total_rmse, total_percentage_accuracy = 0.0, 0.0, 0.0
 
-        for i, (inputs, labels, cell_locations) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch + 1}/{num_epochs}")):
+        for inputs, labels, cell_locations in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{num_epochs}"):
             inputs, labels = inputs.to(device), labels.to(device).view(-1)
             cell_count, predicted_locations = model(inputs)
-            
+
             # Calculate location loss
             total_location_loss = 0
-            for j in range(inputs.size(0)):  # Loop over batch size
+            for j in range(inputs.size(0)):
                 true_loc = cell_locations[j].to(device)
                 num_locations = true_loc.size(0)
                 pred_loc = predicted_locations[j].view(-1, 2)[:num_locations]
@@ -90,21 +97,24 @@ def train_model(model, train_loader, val_loader, num_epochs=100, learning_rate=5
                 location_loss = F.mse_loss(pred_loc, true_loc[min_indices])
                 total_location_loss += location_loss
 
-            # Count loss and total loss
-            count_loss = criterion(cell_count, labels).mean()
+            # Count loss with sample weights
+            sample_weights = dw(cell_count.cpu().detach().numpy())  # Move to CPU and convert to NumPy
+            sample_weights = torch.tensor(sample_weights, dtype=torch.float32, device=device)  # Convert back to tensor
+            count_loss = (sample_weights * criterion(cell_count, labels)).mean()  # Apply sample weights
             total_loss = count_loss + total_location_loss / inputs.size(0)
+
             optimizer.zero_grad()
             total_loss.backward()
             optimizer.step()
             running_loss += total_loss.item()
-
+            
             # Metrics calculations
             mae, rmse, percentage_accuracy = calculate_metrics(cell_count, labels)
             total_mae += mae * inputs.size(0)
             total_rmse += rmse * inputs.size(0)
             total_percentage_accuracy += percentage_accuracy * inputs.size(0)
 
-        # Log epoch metrics
+        # Log epoch loss
         epoch_loss = running_loss / len(train_loader)
         train_losses.append(epoch_loss)
         train_metrics["MAE"].append(total_mae / len(train_loader.dataset))
@@ -120,26 +130,17 @@ def train_model(model, train_loader, val_loader, num_epochs=100, learning_rate=5
         val_metrics["RMSE"].append(val_rmse)
         val_metrics["PercentageAccuracy"].append(val_percentage_accuracy)
 
-        # Learning rate scheduling
-        scheduler.step(val_loss)
-
-        # Early stopping
+        # Save best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
+            best_epoch = epoch + 1  # Save the epoch (1-based indexing)
             torch.save(model.state_dict(), os.path.join(output_dir, "best_model.pth"))
-            early_stop_counter = 0
-        else:
-            early_stop_counter += 1
-            if early_stop_counter >= patience:
-                print("Early stopping triggered")
-                break
+            print(f"Best model updated at epoch {best_epoch} with Val Loss: {val_loss:.4f}")
 
-        print(f"Epoch {epoch + 1}, Train Loss: {epoch_loss:.4f}, Val Loss: {val_loss:.4f}")
-        print(f"Train MAE: {train_metrics['MAE'][-1]:.4f}, Val MAE: {val_metrics['MAE'][-1]:.4f}")
-        print(f"Train RMSE: {train_metrics['RMSE'][-1]:.4f}, Val RMSE: {val_metrics['RMSE'][-1]:.4f}")
-        print(f"Train Percentage Accuracy: {train_metrics['PercentageAccuracy'][-1]:.2f}%, Val Percentage Accuracy: {val_metrics['PercentageAccuracy'][-1]:.2f}%")
+        scheduler.step(val_loss)
 
-    return model, train_losses, val_losses, train_metrics, val_metrics
+    return model, train_losses, val_losses, train_metrics, val_metrics, best_epoch, best_val_loss
+
 
 
 def evaluate_model(model, data_loader, criterion, device):
@@ -177,19 +178,22 @@ def evaluate_model(model, data_loader, criterion, device):
 
 
 def plot_losses(train_losses, val_losses):
-    # Convert tensors to CPU and numpy arrays for plotting
+    # Ensure all tensors are moved to CPU and converted to NumPy
     train_losses = [loss.cpu().numpy() if isinstance(loss, torch.Tensor) else loss for loss in train_losses]
     val_losses = [loss.cpu().numpy() if isinstance(loss, torch.Tensor) else loss for loss in val_losses]
     
     plt.figure(figsize=(10, 5))
     plt.plot(train_losses, label='Training Loss')
     plt.plot(val_losses, label='Validation Loss')
+    plt.yscale('log')  # Log scale to handle large loss values
     plt.xlabel('Epoch')
-    plt.ylabel('Loss')
+    plt.ylabel('Loss (Log Scale)')
     plt.title('Training and Validation Losses')
     plt.legend()
     plt.savefig(os.path.join(output_dir, 'loss_plot.png'))
     plt.close()
+
+
 
 def plot_metrics(train_metrics, val_metrics, metric_name):
     # Convert tensors to CPU and numpy arrays for plotting
@@ -211,13 +215,47 @@ def main():
     train_loader, val_loader = get_data_loaders(batch_size)
     model = CellCounter()
 
-    trained_model, train_losses, val_losses, train_metrics, val_metrics = train_model(model, train_loader, val_loader, num_epochs, learning_rate)
+    # Train the model
+    trained_model, train_losses, val_losses, train_metrics, val_metrics, best_epoch, best_val_loss = train_model(
+        model, train_loader, val_loader, num_epochs, learning_rate, patience=100
+    )
 
+    # Plot losses and metrics
     plot_losses(train_losses, val_losses)
     for metric in ["MAE", "RMSE", "PercentageAccuracy"]:
         plot_metrics(train_metrics[metric], val_metrics[metric], metric)
 
-    print("Training complete. Best model saved in 'Experiments/36/best_model.pth'")
+    print(f"Training complete. Best model saved in '{output_dir}best_model.pth' (Epoch {best_epoch}) with Val Loss: {best_val_loss:.4f}.")
+
+    # Load the best model for final evaluation
+    best_model = CellCounter()
+    best_model.load_state_dict(torch.load(os.path.join(output_dir, "best_model.pth")))
+    best_model.eval()
+
+    # Recalculate metrics directly on the validation set
+    criterion = nn.L1Loss(reduction='none')
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    best_model = best_model.to(device)
+
+    # Directly calculate metrics
+    all_cell_counts = []
+    all_labels = []
+
+    for inputs, labels, _ in val_loader:
+        inputs, labels = inputs.to(device), labels.to(device).view(-1)
+        cell_counts, _ = best_model(inputs)
+        all_cell_counts.append(cell_counts)
+        all_labels.append(labels)
+
+    all_cell_counts = torch.cat(all_cell_counts)
+    all_labels = torch.cat(all_labels)
+
+    # Final metrics
+    val_mae, val_rmse, val_percentage_accuracy = calculate_metrics(all_cell_counts, all_labels)
+    print(f"Final Evaluation on Best Model:")
+    print(f"MAE: {val_mae:.4f}, RMSE: {val_rmse:.4f}, Accuracy: {val_percentage_accuracy:.2f}%")
+
+
 
 
 if __name__ == "__main__":

@@ -15,9 +15,11 @@ class CellCounter(nn.Module):
         # Load the pre-trained ResNet model with specified weights
         self.resnet = models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
         
+        # Add a global average pooling layer
+        self.global_avg_pool = nn.AdaptiveAvgPool2d((1, 1))
+        
         # Replace the final fully connected layer with outputs for cell count
         # ResNet's fc layer is by default (2048 -> 1000), we change it to (2048 -> 2 + num_locations * 2)
-        # where the additional outputs are used for cell location predictions
         self.resnet.fc = nn.Linear(
             in_features=self.resnet.fc.in_features, 
             out_features=2 + num_locations * 2
@@ -38,7 +40,22 @@ class CellCounter(nn.Module):
 
     def forward(self, x):
         # Forward pass through ResNet
-        x = self.resnet(x)
+        x = self.resnet.conv1(x)
+        x = self.resnet.bn1(x)
+        x = self.resnet.relu(x)
+        x = self.resnet.maxpool(x)
+
+        x = self.resnet.layer1(x)
+        x = self.resnet.layer2(x)
+        x = self.resnet.layer3(x)
+        x = self.resnet.layer4(x)
+
+        # Apply global average pooling
+        x = self.global_avg_pool(x)
+        x = torch.flatten(x, 1)
+
+        # Pass through the final fully connected layer
+        x = self.resnet.fc(x)
         
         # Separate outputs for cell count, uncertainty, and cell locations
         cell_count = x[:, 0]
@@ -47,4 +64,4 @@ class CellCounter(nn.Module):
         # Predicted locations, reshape to [batch_size, num_locations, 2] for x, y coordinates
         predicted_locations = x[:, 2:].view(-1, self.num_locations, 2)
         
-        return cell_count, predicted_locations
+        return cell_count, uncertainty, predicted_locations

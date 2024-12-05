@@ -13,7 +13,7 @@ class CellDataset(Dataset):
 
     def __getitem__(self, idx):
         img_path = self.image_paths[idx]
-        gt_path = img_path.replace('images', 'ground_truth').replace('val/', '').replace('train', '').replace('.tiff', '.csv')
+        gt_path = img_path.replace('images', 'ground_truth').replace('val/', '').replace('train', '').replace('test','').replace('.tiff', '.csv')
 
         # Load the image
         img = Image.open(img_path).convert('RGB')

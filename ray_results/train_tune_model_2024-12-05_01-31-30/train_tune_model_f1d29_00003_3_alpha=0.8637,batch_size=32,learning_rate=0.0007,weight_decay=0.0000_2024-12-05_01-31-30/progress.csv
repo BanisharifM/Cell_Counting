@@ -1,0 +1,2 @@
+val_loss,train_loss,timestamp,checkpoint_dir_name,done,training_iteration,trial_id,date,time_this_iter_s,time_total_s,pid,hostname,node_ip,time_since_restore,iterations_since_restore
+148.8520050048828,173.8810430908203,1733384061,,True,1,f1d29_00003,2024-12-05_01-34-21,6.106686592102051,6.106686592102051,2628568,gpub045.delta.ncsa.illinois.edu,141.142.254.145,6.106686592102051,1
