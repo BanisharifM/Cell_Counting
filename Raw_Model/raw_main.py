@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 from raw_dataset_handler import CellDataset
 from raw_model import CellCounter
 
+
 def get_data_loaders(batch_size=8):
     '''
     Creates training and validation data loaders for the IDCIA dataset.
@@ -28,7 +29,6 @@ def get_data_loaders(batch_size=8):
         train_loader (DataLoader): A DataLoader object for the training set.
         val_loader (DataLoader): A DataLoader object for the validation set.
     '''
-
     # Get training and testing image paths
     train_image_paths = glob("IDCIA_Augmentated_V2/images/train/*.tiff")
     val_image_paths = glob("IDCIA_Augmentated_V2/images/val/*.tiff")
@@ -51,8 +51,15 @@ def get_data_loaders(batch_size=8):
     val_dataset = CellDataset(val_image_paths, transform=val_transform)
 
     # Create dataloaders
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+    def custom_collate_fn(batch):
+        images, labels = zip(*batch)
+        images = torch.stack(images)
+        labels = torch.stack(labels)
+        cell_locations = [torch.empty(0, 2) for _ in range(len(labels))]  # Dummy locations for raw model
+        return images, labels, cell_locations
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=custom_collate_fn)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4, collate_fn=custom_collate_fn)
 
     return train_loader, val_loader
 
@@ -66,6 +73,7 @@ def calculate_metrics(pred_count, true_count):
     rmse = torch.sqrt(torch.mean((pred_count - true_count) ** 2)).item()
     percentage_accuracy = (1 - (torch.abs(pred_count - true_count) / true_count)).clamp(0, 1).mean().item() * 100
     return mae, rmse, percentage_accuracy
+
 
 def train_model(model, train_loader, val_loader, num_epochs=100, learning_rate=1e-3):
     '''
@@ -82,9 +90,7 @@ def train_model(model, train_loader, val_loader, num_epochs=100, learning_rate=1
         model (CellCounter): The trained model.
         train_losses (list): A list of training losses for each epoch.
         val_losses (list): A list of validation losses for each epoch.
-
     '''
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = model.to(device)
@@ -102,7 +108,7 @@ def train_model(model, train_loader, val_loader, num_epochs=100, learning_rate=1
         running_loss = 0.0
         total_mae, total_rmse, total_percentage_accuracy = 0.0, 0.0, 0.0
 
-        for inputs, labels in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{num_epochs}"):
+        for inputs, labels, _ in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{num_epochs}"):
             inputs, labels = inputs.to(device), labels.to(device)
             optimizer.zero_grad()
             outputs = model(inputs)
@@ -139,6 +145,7 @@ def train_model(model, train_loader, val_loader, num_epochs=100, learning_rate=1
               f"Val Percentage Accuracy: {val_percentage_accuracy:.2f}%")
 
     return model, train_losses, val_losses, train_metrics, val_metrics
+
 
 def evaluate_model(model, data_loader, criterion, device):
     '''

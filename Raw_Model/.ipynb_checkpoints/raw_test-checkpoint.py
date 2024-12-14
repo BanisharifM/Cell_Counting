@@ -1,14 +1,11 @@
 import os
 import torch
-import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from glob import glob
 import pandas as pd
 from PIL import Image
-import numpy as np
 from raw_model import CellCounter  # Ensure this matches your raw model's file path
-from raw_main import evaluate_model  # Ensure this imports from the correct raw training script
 
 # Directory to save the testing results
 output_dir = "Raw_Model/Raw_Result"
@@ -55,6 +52,18 @@ def get_test_loader(batch_size=1):
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
     return test_loader
 
+def calculate_metrics(pred_count, true_count, n=30):
+    """Calculate corrected metrics including ACP."""
+    mae = torch.abs(pred_count - true_count).mean().item()
+    rmse = torch.sqrt(torch.mean((pred_count - true_count) ** 2)).item()
+    percentage_accuracy = (1 - (torch.abs(pred_count - true_count) / true_count)).clamp(0, 1).mean().item() * 100
+
+    # Dynamic ACP calculation
+    acp_rates = torch.where(true_count < n, 0.10, 0.05)  # Use 0.10 for small cell counts, 0.05 for larger ones
+    acp = ((torch.abs(pred_count - true_count) <= acp_rates * true_count).float().mean().item()) * 100
+
+    return mae, rmse, percentage_accuracy, acp
+
 def test_model():
     # Load the best raw model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -65,26 +74,31 @@ def test_model():
     # Data loader
     test_loader = get_test_loader(batch_size=1)
 
-    for i, (img_tensor, label, cell_locations) in enumerate(test_loader):
-        img_tensor = img_tensor.to(device)
-        predicted_count = model(img_tensor).squeeze(0)  # Raw model predicts cell count only
-        
-        # Log the predicted count and actual count from ground truth
-        actual_count = int(label.item())  # Ground truth count of cells
-        predicted_count_int = int(predicted_count.item())  # Model's predicted count of cells
-        print(f"Image {i+1} | Predicted Cell Count: {predicted_count_int} | Actual Cell Count: {actual_count}")
+    all_pred_counts = []
+    all_true_counts = []
 
-    # Define the criterion for evaluation
-    criterion = nn.L1Loss()
+    print("\nTest Set Predictions:")
+    with torch.no_grad():
+        for i, (img_tensor, label, _) in enumerate(test_loader):
+            img_tensor, label = img_tensor.to(device), label.to(device)
+            predicted_count = model(img_tensor).squeeze(0)  # Raw model predicts cell count only
+            
+            # Log the predicted count and actual count from ground truth
+            predicted_count_int = int(round(predicted_count.item()))
+            actual_count = int(label.item())
+            print(f"Image {i+1} | Predicted Cell Count: {predicted_count_int} | Actual Cell Count: {actual_count}")
 
-    # Evaluate model on test data
-    test_loss, test_mae, test_rmse, test_percentage_accuracy = evaluate_model(
-        model, test_loader, criterion, device
-    )
-    print(f"Test Loss: {test_loss:.4f}")
-    print(f"Test MAE: {test_mae:.4f}")
-    print(f"Test RMSE: {test_rmse:.4f}")
-    print(f"Test Percentage Accuracy: {test_percentage_accuracy:.2f}%")
+            all_pred_counts.append(predicted_count)
+            all_true_counts.append(label)
+
+    all_pred_counts = torch.cat(all_pred_counts)
+    all_true_counts = torch.cat(all_true_counts)
+
+    # Calculate metrics
+    mae, rmse, percentage_accuracy, acp = calculate_metrics(all_pred_counts, all_true_counts)
+
+    print("\nFinal Metrics on Test Set:")
+    print(f"MAE: {mae:.4f}, RMSE: {rmse:.4f}, Accuracy: {percentage_accuracy:.2f}%, ACP: {acp:.2f}%")
 
 if __name__ == "__main__":
     test_model()

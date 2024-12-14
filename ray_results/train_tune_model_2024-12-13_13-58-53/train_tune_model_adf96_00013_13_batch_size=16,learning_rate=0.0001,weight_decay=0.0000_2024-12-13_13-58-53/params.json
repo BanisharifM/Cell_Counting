@@ -1,0 +1,6 @@
+{
+  "alpha": 1.0,
+  "batch_size": 16,
+  "learning_rate": 0.00010349545164103907,
+  "weight_decay": 4.538131309094415e-06
+}

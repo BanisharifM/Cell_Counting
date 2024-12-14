@@ -4,7 +4,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from glob import glob
 from dataset_handler import CellDataset
-from model import CellCounter
+from model9 import CellCounter
 
 
 def custom_collate_fn(batch):
@@ -75,6 +75,6 @@ def evaluate_on_test(best_model_path, batch_size=16, n=30):
 
 
 if __name__ == "__main__":
-    best_model_path = "Experiments/44/best_model.pth"
+    best_model_path = "Experiments/66/best_model.pth"
     batch_size = 16
     evaluate_on_test(best_model_path, batch_size)

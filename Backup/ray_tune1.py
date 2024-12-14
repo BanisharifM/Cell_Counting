@@ -10,7 +10,7 @@ from glob import glob
 from ray import tune
 from ray.tune.schedulers import ASHAScheduler
 from dataset_handler import CellDataset
-from model import CellCounter
+from model9 import CellCounter
 from denseweight import DenseWeight
 
 # Set up paths
@@ -129,7 +129,7 @@ def main():
     tuner = tune.run(
         train_tune_model,
         config={
-            "batch_size": tune.choice([32, 64]),  # Focus on larger batch sizes
+            "batch_size": tune.choice([16,32, 64]),  # Focus on larger batch sizes
             "learning_rate": tune.loguniform(1e-4, 1e-3),  # Centered around 5e-4
             "weight_decay": tune.loguniform(1e-6, 1e-4),  # Centered around 1e-5
             "alpha": 1.0,  # Fixed value, not part of tuning

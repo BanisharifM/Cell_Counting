@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import cv2
 
 # Set the output directory for saving models and plots
-output_dir = "Experiments/48/"
+output_dir = "Experiments/63/"
 os.makedirs(output_dir, exist_ok=True)
 
 def preprocess_clusters(image):
@@ -111,7 +111,7 @@ def calculate_metrics(pred_count, true_count):
 # Weight_decay= 1e-5
 # Learning_Rate= 5e-5
 
-def train_model(model, train_loader, val_loader, num_epochs=100, learning_rate=5e-5, alpha=1.0, weight_decay=8.21253e-05 , patience=100):
+def train_model(model, train_loader, val_loader, num_epochs=100, learning_rate=5e-5, alpha=1.0, weight_decay=1e-5 , patience=100):
     # Setup
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
@@ -293,7 +293,7 @@ def plot_metrics(train_metrics, val_metrics):
 
 
 def main():
-    batch_size, num_epochs, learning_rate = 32, 300, 0.000734941
+    batch_size, num_epochs, learning_rate = 32, 300, 5e-4
     train_loader, val_loader = get_data_loaders(batch_size)
     model = CellCounter()
 

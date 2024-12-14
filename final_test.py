@@ -3,13 +3,14 @@ import torch
 import pandas as pd
 from PIL import Image
 from torchvision import transforms
-from Backup.model5 import CellCounter
+# from Backup.model5 import CellCounter
+from model9 import CellCounter
 
 # Global paths
-MODEL_PATH = "Experiments/36/best_model.pth"  # Path to the best model
+MODEL_PATH = "Experiments/58/best_model.pth"  # Path to the best model
 CSV_PATH = "Result/submission.csv"  # Path to the CSV file
 IMAGE_FOLDER = "IDCIA_Test_Dataset/images/"  # Folder containing the images
-OUTPUT_CSV_PATH = "Result/updated_submission.csv"  # Output CSV file path
+OUTPUT_CSV_PATH = "Experiments/63/submission58.csv"  # Output CSV file path
 
 # Image preprocessing
 def preprocess_image(image_path):

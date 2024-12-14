@@ -2,3 +2,5 @@ IDCIA*
 Backup/Dataset/*
 /IDCIA_Augmentated_V2
 *.pth
+Miniconda3-latest-Linux-x86_64.sh
+sqlite-autoconf-3410000.tar.gz
