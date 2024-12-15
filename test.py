@@ -1,3 +1,14 @@
+# Project Contributors:
+# - Mahdi BanisharifDehkordi
+# - Gretta Buttelmann
+# - Faezeh Rajabi Kouchi
+# - Kojo Adu-Gyamfi
+# References:
+# - Starter code for `CellCounter` was provided as part of the project setup.
+# - Dataset loading functions adapted from project-provided materials.
+
+# Specific contributions include: dynamic ACP calculation, batch processing logic, and metric evaluation improvements.
+
 import os
 import torch
 from torch.utils.data import DataLoader
@@ -8,6 +19,10 @@ from model9 import CellCounter
 
 
 def custom_collate_fn(batch):
+    """
+    Custom collate function for DataLoader.
+    Groups images and labels into a batch for testing.
+    """
     images, labels, cell_locations = zip(*batch)
     images = torch.stack(images)
     labels = torch.stack(labels)
@@ -15,6 +30,10 @@ def custom_collate_fn(batch):
 
 
 def get_test_loader(batch_size=16):
+    """
+    Create a DataLoader for the test dataset with specified batch size.
+    Applies resizing, normalization, and other preprocessing steps to the images.
+    """
     test_image_paths = glob("IDCIA_Augmentated_V2/images/test/*.tiff")
     test_transform = transforms.Compose([
         transforms.Resize((256, 256)),
@@ -27,7 +46,13 @@ def get_test_loader(batch_size=16):
 
 
 def calculate_metrics(pred_count, true_count, n=30):
-    """Calculate corrected metrics including ACP."""
+    """
+    Calculate evaluation metrics:
+    - Mean Absolute Error (MAE)
+    - Root Mean Square Error (RMSE)
+    - Percentage Accuracy
+    - Acceptable Cell Prediction (ACP): dynamically adjusts error tolerance based on cell count.
+    """
     mae = torch.abs(pred_count - true_count).mean().item()
     rmse = torch.sqrt(torch.mean((pred_count - true_count) ** 2)).item()
     percentage_accuracy = (1 - (torch.abs(pred_count - true_count) / true_count)).clamp(0, 1).mean().item() * 100
@@ -40,6 +65,10 @@ def calculate_metrics(pred_count, true_count, n=30):
 
 
 def evaluate_on_test(best_model_path, batch_size=16, n=30):
+    """
+    Evaluate the trained model on the test dataset.
+    Prints predictions for each image and calculates final evaluation metrics.
+    """
     test_loader = get_test_loader(batch_size)
 
     # Load the best model
