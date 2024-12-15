@@ -1,4 +1,13 @@
-# Adding Weight Decay
+# Project Contributors:
+# - Mahdi BanisharifDehkordi
+# - Gretta Buttelmann
+# - Faezeh Rajabi Kouchi
+# - Kojo Adu-Gyamfi
+# References:
+# - Starter code for CellCounter was provided as part of the project setup.
+# - DenseLoss and DenseWeight methodologies were adapted from Steininger et al., 2021.
+
+# Specific contributions include improving the training loop structure, preprocessing functions, and metric calculations.
 
 import os
 import torch
@@ -10,12 +19,13 @@ from torch.nn.utils.rnn import pad_sequence
 from torchvision import transforms
 from glob import glob
 from tqdm import tqdm
-from dataset_handler import CellDataset
+from dataset_handler import CellDataset  # Custom dataset handler
 from model import CellCounter  # Updated model with global average pooling
-from denseweight import DenseWeight
+from denseweight import DenseWeight  # For DenseLoss methodology
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
+
 
 # Set the output directory for saving models and plots
 output_dir = "Experiments/63/"
@@ -23,8 +33,9 @@ os.makedirs(output_dir, exist_ok=True)
 
 def preprocess_clusters(image):
     """
-    Detect and separate clusters in the input image.
-    Uses a combination of GaussianBlur and Watershed Algorithm.
+    Detect and separate clusters in the input image using a combination of GaussianBlur and Watershed Algorithm.
+    
+    This function preprocesses images to handle tightly packed cell clusters, which can hinder accurate cell counting.
     """
     # Ensure the input is 3-channel
     if len(image.shape) == 2:  # Already grayscale
@@ -72,9 +83,11 @@ def preprocess_clusters(image):
     return cluster_separated
 
 
-
-
 def custom_collate_fn(batch):
+    """
+    Custom collate function for DataLoader.
+    Handles padding for cell locations to ensure all sequences in a batch have the same length.
+    """
     images, labels, cell_locations = zip(*batch)
     images = torch.stack(images)
     labels = torch.stack(labels)
@@ -83,6 +96,10 @@ def custom_collate_fn(batch):
     return images, labels, padded_cell_locations
 
 def get_data_loaders(batch_size=16):
+    """
+    Creates data loaders for training and validation datasets.
+    Handles transformations for images, including resizing, normalization, and augmentation.
+    """
     train_image_paths = glob("IDCIA_Augmentated_V2/images/train/*.tiff")
     val_image_paths = glob("IDCIA_Augmentated_V2/images/val/*.tiff")
     train_transform = transforms.Compose([
@@ -102,7 +119,10 @@ def get_data_loaders(batch_size=16):
     return train_loader, val_loader
 
 def calculate_metrics(pred_count, true_count):
-    """Calculate corrected metrics."""
+    """
+    Calculate evaluation metrics: Mean Absolute Error (MAE), Root Mean Square Error (RMSE),
+    and Percentage Accuracy.
+    """
     mae = torch.abs(pred_count - true_count).mean().item()
     rmse = torch.sqrt(torch.mean((pred_count - true_count) ** 2)).item()
     percentage_accuracy = (1 - (torch.abs(pred_count - true_count) / true_count)).clamp(0, 1).mean().item() * 100
@@ -112,6 +132,10 @@ def calculate_metrics(pred_count, true_count):
 # Learning_Rate= 5e-5
 
 def train_model(model, train_loader, val_loader, num_epochs=100, learning_rate=5e-5, alpha=1.0, weight_decay=1e-5 , patience=100):
+    """
+    Trains the model with specified parameters.
+    Includes DenseLoss for handling unbalanced datasets and early stopping for avoiding overfitting.
+    """
     # Setup
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
